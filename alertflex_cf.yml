@@ -34,12 +34,16 @@ Parameters:
     Description: VpcId of location for Alertflex EC2 
     ConstraintDescription: must be the VPC Id of an existing Virtual Private Cloud.
     
-  SubnetID:
-    Description: Subnet ID
+  ControlSubnetID:
+    Description: Subnet ID for control network interface.
+    Type: AWS::EC2::Subnet::Id
+    
+  MirrorSubnetID:
+    Description: Subnet ID for mirror network interface.
     Type: AWS::EC2::Subnet::Id
   
   PrivateLocation:
-    Description: The IP address range that can be used for access via ActiveMQ, Redis, Wazuh ports to the Alertflex EC2 instance.
+    Description: The IP address range that can be used for access via ActiveMQ, Redis, Wazuh ports to control network interface.
     Type: String
     MinLength: '9'
     MaxLength: '18'
@@ -48,7 +52,16 @@ Parameters:
     ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
   
   PublicLocation:
-    Description: The IP address range that can be used for access via SSH and HTTPS to the Alertflex EC2 instance.
+    Description: The IP address range that can be used for access via SSH and HTTPS to control network interface.
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+    
+  MirrorLocation:
+    Description: The IP address range that can be used for access mirror network interface.
     Type: String
     MinLength: '9'
     MaxLength: '18'
@@ -151,9 +164,7 @@ Resources:
       ImageId: ami-0c2b8ca1dad447f8a
       InstanceType: !Ref 'InstanceType'
       KeyName: !Ref 'KeyName'
-      SubnetId: !Ref 'SubnetID'
-      SecurityGroupIds:
-          - !GetAtt 'ServerSecurityGroup.GroupId'
+      
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:
@@ -162,6 +173,14 @@ Resources:
             DeleteOnTermination: 'false'
             Encrypted: 'true'
             
+      NetworkInterfaces:
+        -
+          NetworkInterfaceId: !Ref controlXface
+          DeviceIndex: 0
+        -
+          NetworkInterfaceId: !Ref mirrorXface
+          DeviceIndex: 1
+          
       UserData:
         Fn::Base64:
           !Sub |
@@ -175,6 +194,32 @@ Resources:
             
             # cfn-init completed so signal success or not
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AlertflexInstance --region ${AWS::Region}
+            
+  controlXface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref ControlSubnetID
+      Description: Interface for controlling traffic such as SSH
+      GroupSet: 
+      - !Ref ServerSecurityGroup
+      SourceDestCheck: true
+      Tags:
+        -
+          Key: Network
+          Value: Control
+  
+  mirrorXface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      SubnetId: !Ref MirrorSubnetID
+      Description: Interface for mirroring traffic
+      GroupSet: 
+      - !Ref MirrorSecurityGroup
+      SourceDestCheck: true
+      Tags:
+        -
+          Key: Network
+          Value: Mirror
   
   ServerSecurityGroup:
     # http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-security-group.html
@@ -207,6 +252,22 @@ Resources:
         FromPort: 22
         ToPort: 22
         CidrIp: !Ref 'PublicLocation'
+        
+  MirrorSecurityGroup:
+    # http://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ec2-security-group.html
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VpcId
+      GroupDescription: allow connections from specified CIDR ranges
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 0
+        ToPort: 65535
+        CidrIp: !Ref 'MirrorLocation'
+      - IpProtocol: udp
+        FromPort: 0
+        ToPort: 65535
+        CidrIp: !Ref 'MirrorLocation'
   
   IPAddress:
     Type: AWS::EC2::EIP
@@ -214,9 +275,9 @@ Resources:
   IPAssoc:
     Type: AWS::EC2::EIPAssociation
     Properties:
-      InstanceId: !Ref 'AlertflexInstance'
-      EIP: !Ref 'IPAddress' 
-
+      AllocationId: !GetAtt 'IPAddress.AllocationId'
+      NetworkInterfaceId: !Ref 'controlXface'
+      
   LambdaKinesisRole:
     Type: AWS::IAM::Role
     Properties:
@@ -252,7 +313,7 @@ Resources:
         SecurityGroupIds:
           - !GetAtt 'ServerSecurityGroup.GroupId'
         SubnetIds:
-          - !Ref 'SubnetID'
+          - !Ref 'ControlSubnetID'
       Handler: lambda_function.lambda_handler
       Runtime: python3.6
       Environment:
@@ -333,7 +394,7 @@ Resources:
         SecurityGroupIds:
           - !GetAtt 'ServerSecurityGroup.GroupId'
         SubnetIds:
-          - !Ref 'SubnetID'
+          - !Ref 'ControlSubnetID'
       Handler: lambda_function.lambda_handler
       Runtime: python3.6
       Environment:
