@@ -97,7 +97,35 @@ Parameters:
     AllowedValues:
       - internal
       - external
-
+      
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Network Configuration"
+        Parameters:
+          - VpcId
+          - ControlSubnetID
+          - MirrorSubnetID
+          - PrivateLocation
+          - PublicLocation
+          - MirrorLocation
+          
+      - Label:
+          default: "Amazon EC2 Configuration"
+        Parameters:
+          - InstanceType
+          - DiskSize
+          - KeyName
+          - AdminPassword
+          
+      - Label:
+          default: "Soluion configuration"
+        Parameters:
+          - IntegrationFW
+          - IntegrationWAF
+          - MispInstall
+    
 Conditions:
   CreateIntegrationFW: !Equals [ !Ref IntegrationFW, Yes ]
   CreateIntegrationWAF: !Equals [ !Ref IntegrationWAF, Yes ]
@@ -110,11 +138,8 @@ Resources:
       Comment: output public dns name
       AWS::CloudFormation::Init:
         config:
-          packages:
-            yum:
-              git: []
           files:
-            "/home/ec2-user/cr_env_ami.sh":
+            "/home/ubuntu/cr_env_cf.sh":
               content: !Sub |
                 #!/bin/bash
                 pwd=${AdminPassword}
@@ -123,50 +148,50 @@ Resources:
                 misp_port=':8443'
                 misp_url=$public_hostname$misp_port
                 misp_install=${MispInstall} 
-                echo "#!/bin/bash" >> /home/ec2-user/cnode/env_ami.sh
-                echo "export ADMIN_HOST=$public_hostname" >> /home/ec2-user/cnode/env_ami.sh
-                echo "export ADMIN_PWD=$pwd" >> /home/ec2-user/cnode/env_ami.sh
-                echo "export DB_PWD=$pwd" >> /home/ec2-user/cnode/env_ami.sh
-                echo "export AMQ_CN=$public_hostname" >> /home/ec2-user/cnode/env_ami.sh
-                echo "export AMQ_PWD=$pwd" >> /home/ec2-user/cnode/env_ami.sh
-                echo "export PROJECT_ID=$project_id" >> /home/ec2-user/cnode/env_ami.sh
-                echo "export INSTALL_MISP=$misp_install" >> /home/ec2-user/cnode/env_ami.sh
-                echo "export MISP_URL=$misp_url" >> /home/ec2-user/cnode/env_ami.sh 
-                echo "export AMQ_PWD=$pwd" >> /home/ec2-user/altprobe/env_ami.sh
-                echo "export PROJECT_ID=$project_id" >> /home/ec2-user/altprobe/env_ami.sh
+                echo "#!/bin/bash" >> /home/ubuntu/cnode/env_cf.sh
+                echo "export ADMIN_HOST=$public_hostname" >> /home/ubuntu/cnode/env_cf.sh
+                echo "export ADMIN_PWD=$pwd" >> /home/ubuntu/cnode/env_cf.sh
+                echo "export DB_PWD=$pwd" >> /home/ubuntu/cnode/env_cf.sh
+                echo "export AMQ_CN=$public_hostname" >> /home/ubuntu/cnode/env_cf.sh
+                echo "export AMQ_PWD=$pwd" >> /home/ubuntu/cnode/env_cf.sh
+                echo "export PROJECT_ID=$project_id" >> /home/ubuntu/cnode/env_cf.sh
+                echo "export INSTALL_MISP=$misp_install" >> /home/ubuntu/cnode/env_cf.sh
+                echo "export MISP_URL=$misp_url" >> /home/ubuntu/cnode/env_cf.sh 
+                echo "export AMQ_PWD=$pwd" >> /home/ubuntu/altprobe/env_cf.sh
+                echo "export PROJECT_ID=$project_id" >> /home/ubuntu/altprobe/env_cf.sh
               mode: '755'
-              owner: ec2-user
-              group: ec2-user
+              owner: ubuntu
+              group: ubuntu
           commands:
             step1:
-              command: "git clone --single-branch --branch develop https://github.com/alertflex/cnode.git"
-              cwd: "/home/ec2-user"
+              command: "git clone https://github.com/alertflex/cnode.git"
+              cwd: "/home/ubuntu"
             step2:
               command: "git clone https://github.com/alertflex/altprobe.git"
-              cwd: "/home/ec2-user"
+              cwd: "/home/ubuntu"
             step3:
-              command: "./cr_env_ami.sh"
-              cwd: "/home/ec2-user"
+              command: "./cr_env_cf.sh"
+              cwd: "/home/ubuntu"
             step4:
               command: "chmod u+x install_cf.sh"
-              cwd: "/home/ec2-user/cnode"
+              cwd: "/home/ubuntu/cnode"
             step5:
               command: "./install_cf.sh"
-              cwd: "/home/ec2-user/cnode"
+              cwd: "/home/ubuntu/cnode"
             step6:
               command: "chmod u+x install_cf.sh"
-              cwd: "/home/ec2-user/altprobe"
+              cwd: "/home/ubuntu/altprobe"
             step7:
               command: "./install_cf.sh"
-              cwd: "/home/ec2-user/altprobe"
+              cwd: "/home/ubuntu/altprobe"
               
     Properties:
-      ImageId: ami-0c2b8ca1dad447f8a
+      ImageId: ami-0747bdcabd34c712a
       InstanceType: !Ref 'InstanceType'
       KeyName: !Ref 'KeyName'
       
       BlockDeviceMappings:
-        - DeviceName: /dev/xvda
+        - DeviceName: /dev/sda1
           Ebs:
             VolumeType: gp2
             VolumeSize: !Ref 'DiskSize'
@@ -185,15 +210,13 @@ Resources:
         Fn::Base64:
           !Sub |
             #!/bin/bash -xe
-            
-            # Get the latest CloudFormation helper scripts
-            yum install -y aws-cfn-bootstrap
-            
-            # Start cfn-init
-            /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource AlertflexInstance --region ${AWS::Region}
-            
-            # cfn-init completed so signal success or not
-            /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AlertflexInstance --region ${AWS::Region}
+            sudo apt-get update -y
+            sudo apt-get install -y python-setuptools
+            sudo mkdir -p /opt/aws/bin
+            wget https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-latest.tar.gz
+            sudo python -m easy_install --script-dir /opt/aws/bin aws-cfn-bootstrap-latest.tar.gz
+            sudo /opt/aws/bin/cfn-init --stack ${AWS::StackName} --resource AlertflexInstance --region ${AWS::Region}
+            sudo /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource AlertflexInstance --region ${AWS::Region}
             
   controlXface:
     Type: AWS::EC2::NetworkInterface
@@ -215,7 +238,6 @@ Resources:
       Description: Interface for mirroring traffic
       GroupSet: 
       - !Ref MirrorSecurityGroup
-      SourceDestCheck: true
       Tags:
         -
           Key: Network
@@ -260,15 +282,11 @@ Resources:
       VpcId: !Ref VpcId
       GroupDescription: allow connections from specified CIDR ranges
       SecurityGroupIngress:
-      - IpProtocol: tcp
-        FromPort: 0
-        ToPort: 65535
-        CidrIp: !Ref 'MirrorLocation'
       - IpProtocol: udp
-        FromPort: 0
-        ToPort: 65535
-        CidrIp: !Ref 'MirrorLocation'
-  
+        FromPort: 4789
+        ToPort: 4789
+        CidrIp: !Ref 'PrivateLocation'
+        
   IPAddress:
     Type: AWS::EC2::EIP
   
@@ -446,3 +464,9 @@ Outputs:
     Value: !Ref KinesisNetflowFW
     Export:
       Name: KinesisNetflowFW
+      
+  PublicIPAppliance:
+    Description: Name 
+    Value: !GetAtt 'AlertflexInstance.PublicDnsName'
+    Export:
+      Name: DnsPublicIPAppliance
