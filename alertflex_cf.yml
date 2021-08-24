@@ -92,11 +92,12 @@ Parameters:
       
   MispInstall:
     Description: Install MISP
-    Default: internal
+    Default: external
     Type: String
     AllowedValues:
-      - internal
       - external
+      - internal
+      
       
 Metadata:
   AWS::CloudFormation::Interface:
@@ -338,12 +339,7 @@ Resources:
         Variables:
           RedisAddressEnvName: !GetAtt 'AlertflexInstance.PrivateIp'
 
-  BucketAlertsFW:
-    Type: AWS::S3::Bucket
-    Condition: CreateIntegrationFW
-    Properties: {}
-    
-  BucketNetflowFW:
+  BucketFW:
     Type: AWS::S3::Bucket
     Condition: CreateIntegrationFW
     Properties: {}
@@ -355,7 +351,7 @@ Resources:
       ExtendedS3DestinationConfiguration:
         BucketARN:
           Fn::GetAtt:
-            - BucketAlertsFW
+            - BucketFW
             - Arn 
         RoleARN:
           Fn::GetAtt:
@@ -379,7 +375,7 @@ Resources:
       ExtendedS3DestinationConfiguration:
         BucketARN:
           Fn::GetAtt:
-            - BucketNetflowFW
+            - BucketFW
             - Arn 
         RoleARN:
           Fn::GetAtt:
@@ -419,7 +415,7 @@ Resources:
         Variables:
           RedisAddressEnvName: !GetAtt 'AlertflexInstance.PrivateIp'
 
-  BucketLogsWaf:
+  BucketWaf:
     Type: AWS::S3::Bucket
     Condition: CreateIntegrationWAF
     Properties: {}
@@ -432,7 +428,7 @@ Resources:
       ExtendedS3DestinationConfiguration:
         BucketARN:
           Fn::GetAtt:
-            - BucketLogsWaf
+            - BucketWaf
             - Arn 
         RoleARN:
           Fn::GetAtt:
